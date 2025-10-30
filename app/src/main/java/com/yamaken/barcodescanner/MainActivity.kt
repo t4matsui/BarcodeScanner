@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -15,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
 
         var isCameraMode by remember { mutableStateOf(true) }
         var capturedImage by remember { mutableStateOf<Bitmap?>(null) }
-        var detectionBox by remember { mutableStateOf<android.graphics.Rect?>(null) }
+        var detectionBox by remember { mutableStateOf<Rect?>(null) }
         var barcodeDetected by remember { mutableStateOf(false) }
         var scannedCode by remember { mutableStateOf("") }
         var codeType by remember { mutableStateOf("") }
@@ -158,7 +160,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (barcodeDetected && detectionBox != null) {
-                        androidx.compose.foundation.Canvas(
+                        Canvas(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             val box = detectionBox!!
@@ -174,7 +176,7 @@ class MainActivity : ComponentActivity() {
                             val offsetY = (size.height - scaledHeight) / 2
 
                             drawRect(
-                                color = androidx.compose.ui.graphics.Color.Green,
+                                color = androidx.compose.ui.graphics.Color.Green.copy(alpha = 0.6f),
                                 topLeft = androidx.compose.ui.geometry.Offset(
                                     offsetX + box.left * scale,
                                     offsetY + box.top * scale
@@ -183,7 +185,7 @@ class MainActivity : ComponentActivity() {
                                     box.width() * scale,
                                     box.height() * scale
                                 ),
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8f)
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
                             )
                         }
                     }
@@ -280,51 +282,59 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            Button(
-                                onClick = {
-                                    Log.d("Camera", "シャッターボタンクリック")
-                                    imageCapture?.let { capture ->
-                                        Log.d("Camera", "撮影開始")
-                                        capture.takePicture(
-                                            cameraExecutor,
-                                            object : ImageCapture.OnImageCapturedCallback() {
-                                                override fun onCaptureSuccess(image: ImageProxy) {
-                                                    try {
-                                                        Log.d("Camera", "撮影成功")
-                                                        val bitmap = imageProxyToBitmap(image)
-                                                        Log.d("Camera", "Bitmap変換完了")
+                            Box(
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .background(Color.Gray, CircleShape)
+                                    .border(4.dp, Color.Gray, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Button(
+                                    onClick = {
+                                        Log.d("Camera", "シャッターボタンクリック")
+                                        imageCapture?.let { capture ->
+                                            Log.d("Camera", "撮影開始")
+                                            capture.takePicture(
+                                                cameraExecutor,
+                                                object : ImageCapture.OnImageCapturedCallback() {
+                                                    override fun onCaptureSuccess(image: ImageProxy) {
+                                                        try {
+                                                            Log.d("Camera", "撮影成功")
+                                                            val bitmap = imageProxyToBitmap(image)
+                                                            Log.d("Camera", "Bitmap変換完了")
 
-                                                        // メインスレッドで状態を更新
-                                                        ContextCompat.getMainExecutor(context).execute {
-                                                            cameraProvider?.unbindAll()
-                                                            capturedImage = bitmap
-                                                            isCameraMode = false
-                                                            errorMessage = ""
+                                                            // メインスレッドで状態を更新
+                                                            ContextCompat.getMainExecutor(context).execute {
+                                                                cameraProvider?.unbindAll()
+                                                                capturedImage = bitmap
+                                                                isCameraMode = false
+                                                                errorMessage = ""
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            Log.e("Camera", "エラー", e)
+                                                        } finally {
+                                                            image.close()
                                                         }
-                                                    } catch (e: Exception) {
-                                                        Log.e("Camera", "エラー", e)
-                                                    } finally {
-                                                        image.close()
+                                                    }
+
+                                                    override fun onError(exception: ImageCaptureException) {
+                                                        Log.e("Camera", "撮影失敗: ${exception.message}")
                                                     }
                                                 }
-
-                                                override fun onError(exception: ImageCaptureException) {
-                                                    Log.e("Camera", "撮影失敗: ${exception.message}")
-                                                }
-                                            }
-                                        )
-                                    } ?: run {
-                                        Log.e("Camera", "ImageCapture is null")
-                                    }
-                                },
-                                modifier = Modifier
-                                    .size(70.dp),
-                                shape = CircleShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color.Gray
-                                )
-                            ) {}
+                                            )
+                                        } ?: run {
+                                            Log.e("Camera", "ImageCapture is null")
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(64.dp),
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {}
+                            }
                         }
                     }
 
