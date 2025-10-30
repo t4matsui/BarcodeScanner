@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -29,7 +28,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -38,6 +36,16 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Rect
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.annotation.RequiresApi
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -54,6 +62,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -77,6 +86,7 @@ class MainActivity : ComponentActivity() {
         cameraExecutor.shutdown()
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     @Composable
     fun BarcodeScannerScreen() {
         val context = LocalContext.current
@@ -91,6 +101,10 @@ class MainActivity : ComponentActivity() {
         var isDetecting by remember { mutableStateOf(false) }
         var isScanning by remember { mutableStateOf(false) }
         var errorMessage by remember { mutableStateOf("") }
+        var isSaving by remember { mutableStateOf(false) }
+        var saveMessage by remember { mutableStateOf("") }
+        var scanTimestamp by remember { mutableStateOf("") }
+        var detectedBox by remember { mutableStateOf<Rect?>(null) }
 
         var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
         var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
@@ -176,7 +190,7 @@ class MainActivity : ComponentActivity() {
                             val offsetY = (size.height - scaledHeight) / 2
 
                             drawRect(
-                                color = androidx.compose.ui.graphics.Color.Green.copy(alpha = 0.6f),
+                                color = Color.Green.copy(alpha = 0.6f),
                                 topLeft = androidx.compose.ui.geometry.Offset(
                                     offsetX + box.left * scale,
                                     offsetY + box.top * scale
@@ -240,6 +254,7 @@ class MainActivity : ComponentActivity() {
                                                 if (barcodes.isNotEmpty()) {
                                                     barcodeDetected = true
                                                     detectionBox = barcodes.first().boundingBox
+                                                    detectedBox = barcodes.first().boundingBox
                                                 } else {
                                                     barcodeDetected = false
                                                     detectionBox = null
@@ -270,6 +285,9 @@ class MainActivity : ComponentActivity() {
                                                         Barcode.FORMAT_CODE_39 -> "CODE-39"
                                                         else -> "バーコード"
                                                     }
+                                                    // スキャン時刻を記録
+                                                    val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                                                    scanTimestamp = sdf.format(Date())
                                                 }
                                                 isScanning = false
                                             }
@@ -341,19 +359,53 @@ class MainActivity : ComponentActivity() {
                     // メッセージエリア
                     Column {
                         if (!isCameraMode) {
-                            Text(
-                                text = when {
-                                    scannedCode.isNotEmpty() -> "読み取り完了"
-                                    barcodeDetected -> "バーコード検知完了"
-                                    errorMessage.isNotEmpty() -> "エラー"
-                                    else -> "検知ボタンを押してください"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (errorMessage.isNotEmpty())
-                                    MaterialTheme.colorScheme.error
-                                else
-                                    MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = when {
+                                        scannedCode.isNotEmpty() -> "読み取り完了"
+                                        barcodeDetected -> "バーコード検知完了"
+                                        errorMessage.isNotEmpty() -> "エラー"
+                                        else -> "検知ボタンを押してください"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (errorMessage.isNotEmpty())
+                                        MaterialTheme.colorScheme.error
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                // 保存ボタン（スキャン完了時のみ表示）
+                                if (scannedCode.isNotEmpty()) {
+                                    Button(
+                                        onClick = {
+                                            isSaving = true
+                                            saveMessage = ""
+                                            capturedImage?.let { bitmap ->
+                                                saveScanResult(
+                                                    context = context,
+                                                    bitmap = bitmap,
+                                                    detectionBox = detectedBox,
+                                                    scanCode = scannedCode,
+                                                    scanType = codeType,
+                                                    timestamp = scanTimestamp
+                                                ) { success, message ->
+                                                    isSaving = false
+                                                    saveMessage = message
+                                                }
+                                            }
+                                        },
+                                        enabled = !isSaving,
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Text(text = if (isSaving) "保存中..." else "保存")
+                                    }
+                                }
+                            }
 
                             Spacer(modifier = Modifier.height(8.dp))
 
@@ -361,6 +413,17 @@ class MainActivity : ComponentActivity() {
                                 Text(text = "種類: $codeType", style = MaterialTheme.typography.bodyMedium)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(text = "内容: $scannedCode", style = MaterialTheme.typography.bodyLarge)
+                                if (saveMessage.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = saveMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (saveMessage.contains("成功"))
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.error
+                                    )
+                                }
                             } else if (errorMessage.isNotEmpty()) {
                                 Text(
                                     text = errorMessage,
@@ -453,6 +516,116 @@ class MainActivity : ComponentActivity() {
             errorBitmap.eraseColor(android.graphics.Color.BLUE)
             return errorBitmap
         }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun saveScanResult(
+        context: Context,
+        bitmap: Bitmap,
+        detectionBox: Rect?,
+        scanCode: String,
+        scanType: String,
+        timestamp: String,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        try {
+            // 緑枠を描画したBitmapを作成
+            val bitmapWithFrame = createBitmapWithFrame(bitmap, detectionBox)
+
+            // リサイズ（縦を1024pxに）
+            val resizedBitmap = resizeBitmap(bitmapWithFrame, 1024)
+
+            // Downloadsフォルダに保存（Android 10以降で確実に動作）
+            // テキストファイル保存
+            val textValues = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "$timestamp.txt")
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/BarcodeScanner")
+            }
+
+            val textUri = context.contentResolver.insert(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                textValues
+            )
+
+            textUri?.let { uri ->
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    val textContent = "種類: $scanType\n内容: $scanCode\n日時: $timestamp"
+                    out.write(textContent.toByteArray())
+                }
+                Log.d("SaveResult", "テキスト保存成功: $uri")
+            }
+
+            // 画像ファイル保存
+            val imageValues = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "$timestamp.jpg")
+                put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/BarcodeScanner")
+            }
+
+            val imageUri = context.contentResolver.insert(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                imageValues
+            )
+
+            imageUri?.let { uri ->
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                }
+                Log.d("SaveResult", "画像保存成功: $uri")
+            }
+
+            if (textUri != null && imageUri != null) {
+                onComplete(true, "保存成功: Download/BarcodeScanner/")
+                Log.d("SaveResult", "保存完了")
+            } else {
+                onComplete(false, "保存失敗: URIの作成に失敗")
+                Log.e("SaveResult", "textUri=$textUri, imageUri=$imageUri")
+            }
+        } catch (e: Exception) {
+            Log.e("SaveResult", "保存失敗", e)
+            e.printStackTrace()
+            onComplete(false, "保存失敗: ${e.message}")
+        }
+    }
+
+    private fun createBitmapWithFrame(originalBitmap: Bitmap, detectionBox: Rect?): Bitmap {
+        val mutableBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = android.graphics.Canvas(mutableBitmap)
+
+        // 検知枠を描画
+        detectionBox?.let { box ->
+            Log.d("SaveResult", "描画する枠: left=${box.left}, top=${box.top}, right=${box.right}, bottom=${box.bottom}")
+            Log.d("SaveResult", "Bitmapサイズ: ${mutableBitmap.width}x${mutableBitmap.height}")
+
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.argb(153, 0, 255, 0) // 60%透明度の緑
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 8f
+            }
+
+            // Rectをそのまま描画
+            canvas.drawRect(
+                box.left.toFloat(),
+                box.top.toFloat(),
+                box.right.toFloat(),
+                box.bottom.toFloat(),
+                paint
+            )
+
+            Log.d("SaveResult", "枠描画完了")
+        } ?: run {
+            Log.e("SaveResult", "detectionBoxがnull")
+        }
+
+        return mutableBitmap
+    }
+
+    private fun resizeBitmap(bitmap: Bitmap, targetHeight: Int): Bitmap {
+        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+        val targetWidth = (targetHeight * aspectRatio).toInt()
+
+        return Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
     }
 }
 
