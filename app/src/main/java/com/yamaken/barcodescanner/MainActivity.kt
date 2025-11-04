@@ -190,7 +190,7 @@ class MainActivity : ComponentActivity() {
                             val offsetY = (size.height - scaledHeight) / 2
 
                             drawRect(
-                                color = Color.Green.copy(alpha = 0.6f),
+                                color = androidx.compose.ui.graphics.Color.Green.copy(alpha = 0.6f),
                                 topLeft = androidx.compose.ui.geometry.Offset(
                                     offsetX + box.left * scale,
                                     offsetY + box.top * scale
@@ -535,12 +535,16 @@ class MainActivity : ComponentActivity() {
             // リサイズ（縦を1024pxに）
             val resizedBitmap = resizeBitmap(bitmapWithFrame, 1024)
 
+            // タイムスタンプから日付とファイル名を分離
+            val dateFolder = timestamp.substring(0, 8) // yyyyMMdd
+            val fileName = timestamp.substring(9) // HHmmss
+
             // Downloadsフォルダに保存（Android 10以降で確実に動作）
             // テキストファイル保存
             val textValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$timestamp.txt")
+                put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.txt")
                 put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/BarcodeScanner")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
             }
 
             val textUri = context.contentResolver.insert(
@@ -558,9 +562,9 @@ class MainActivity : ComponentActivity() {
 
             // 画像ファイル保存
             val imageValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$timestamp.jpg")
+                put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.jpg")
                 put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/BarcodeScanner")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
             }
 
             val imageUri = context.contentResolver.insert(
@@ -576,7 +580,7 @@ class MainActivity : ComponentActivity() {
             }
 
             if (textUri != null && imageUri != null) {
-                onComplete(true, "保存成功: Download/BarcodeScanner/")
+                onComplete(true, "保存成功: Download/BarcodeScanner/$dateFolder/")
                 Log.d("SaveResult", "保存完了")
             } else {
                 onComplete(false, "保存失敗: URIの作成に失敗")
@@ -636,10 +640,10 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.3.1")
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
-    
+
     // ML Kit Barcode Scanning
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
-    
+
     // Jetpack Compose
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.compose.material3:material3:1.1.2")
