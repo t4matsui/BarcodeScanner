@@ -4,8 +4,7 @@ package com.yamaken.barcodescanner
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -13,7 +12,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -25,32 +23,30 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
-import android.content.ContentValues
-import android.content.Context
-import android.graphics.Rect
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import androidx.annotation.RequiresApi
+import com.yamaken.barcodescanner.barcode.BarcodeProcessor
+import com.yamaken.barcodescanner.camera.CameraManager
+import com.yamaken.barcodescanner.storage.ScanResultStorage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
-    private lateinit var cameraExecutor: ExecutorService
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val barcodeProcessor = BarcodeProcessor()
+    private lateinit var cameraManager: CameraManager
+    private lateinit var storage: ScanResultStorage
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -62,10 +58,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        cameraManager = CameraManager(this, cameraExecutor)
+        storage = ScanResultStorage(this)
 
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.CAMERA
@@ -84,9 +81,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
+        barcodeProcessor.release()
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     @Composable
     fun BarcodeScannerScreen() {
         val context = LocalContext.current
@@ -106,8 +103,7 @@ class MainActivity : ComponentActivity() {
         var scanTimestamp by remember { mutableStateOf("") }
         var detectedBox by remember { mutableStateOf<Rect?>(null) }
 
-        var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
-        var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
+        var currentImageCapture: ImageCapture? by remember { mutableStateOf(null) }
 
         Column(
             modifier = Modifier.fillMaxSize()
@@ -122,35 +118,9 @@ class MainActivity : ComponentActivity() {
                     AndroidView(
                         factory = { ctx ->
                             val previewView = PreviewView(ctx)
-                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-
-                            cameraProviderFuture.addListener({
-                                cameraProvider = cameraProviderFuture.get()
-
-                                val preview = Preview.Builder().build().also {
-                                    it.setSurfaceProvider(previewView.surfaceProvider)
-                                }
-
-                                val imageCaptureBuilder = ImageCapture.Builder()
-                                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                                    .setTargetRotation(android.view.Surface.ROTATION_0)
-                                imageCapture = imageCaptureBuilder.build()
-
-                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                                try {
-                                    cameraProvider?.unbindAll()
-                                    cameraProvider?.bindToLifecycle(
-                                        lifecycleOwner,
-                                        cameraSelector,
-                                        preview,
-                                        imageCapture
-                                    )
-                                } catch (e: Exception) {
-                                    Log.e("CameraX", "カメラの起動に失敗", e)
-                                }
-                            }, ContextCompat.getMainExecutor(ctx))
-
+                            cameraManager.startCamera(previewView, lifecycleOwner) { imageCapture ->
+                                currentImageCapture = imageCapture
+                            }
                             previewView
                         },
                         modifier = Modifier.fillMaxSize()
@@ -159,7 +129,7 @@ class MainActivity : ComponentActivity() {
                     DisposableEffect(Unit) {
                         onDispose {
                             if (!isCameraMode) {
-                                cameraProvider?.unbindAll()
+                                cameraManager.stopCamera()
                             }
                         }
                     }
@@ -190,16 +160,16 @@ class MainActivity : ComponentActivity() {
                             val offsetY = (size.height - scaledHeight) / 2
 
                             drawRect(
-                                color = androidx.compose.ui.graphics.Color.Green.copy(alpha = 0.6f),
-                                topLeft = androidx.compose.ui.geometry.Offset(
+                                color = Color.Green.copy(alpha = 0.6f),
+                                topLeft = Offset(
                                     offsetX + box.left * scale,
                                     offsetY + box.top * scale
                                 ),
-                                size = androidx.compose.ui.geometry.Size(
+                                size = Size(
                                     box.width() * scale,
                                     box.height() * scale
                                 ),
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                                style = Stroke(width = 4f)
                             )
                         }
                     }
@@ -250,7 +220,7 @@ class MainActivity : ComponentActivity() {
                                         isDetecting = true
                                         errorMessage = ""
                                         capturedImage?.let { bitmap ->
-                                            detectBarcodeInBitmap(bitmap) { barcodes ->
+                                            barcodeProcessor.detectBarcode(bitmap) { barcodes ->
                                                 if (barcodes.isNotEmpty()) {
                                                     barcodeDetected = true
                                                     detectionBox = barcodes.first().boundingBox
@@ -274,17 +244,10 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         isScanning = true
                                         capturedImage?.let { bitmap ->
-                                            scanBitmapForBarcode(bitmap) { barcode ->
+                                            barcodeProcessor.scanBarcode(bitmap) { barcode ->
                                                 barcode?.let {
                                                     scannedCode = it.rawValue ?: ""
-                                                    codeType = when (it.format) {
-                                                        Barcode.FORMAT_QR_CODE -> "QRコード"
-                                                        Barcode.FORMAT_EAN_13 -> "EAN-13"
-                                                        Barcode.FORMAT_EAN_8 -> "EAN-8"
-                                                        Barcode.FORMAT_CODE_128 -> "CODE-128"
-                                                        Barcode.FORMAT_CODE_39 -> "CODE-39"
-                                                        else -> "バーコード"
-                                                    }
+                                                    codeType = barcodeProcessor.getBarcodeTypeName(it.format)
                                                     // スキャン時刻を記録
                                                     val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
                                                     scanTimestamp = sdf.format(Date())
@@ -310,34 +273,19 @@ class MainActivity : ComponentActivity() {
                                 Button(
                                     onClick = {
                                         Log.d("Camera", "シャッターボタンクリック")
-                                        imageCapture?.let { capture ->
+                                        currentImageCapture?.let { imageCapture ->
                                             Log.d("Camera", "撮影開始")
-                                            capture.takePicture(
-                                                cameraExecutor,
-                                                object : ImageCapture.OnImageCapturedCallback() {
-                                                    override fun onCaptureSuccess(image: ImageProxy) {
-                                                        try {
-                                                            Log.d("Camera", "撮影成功")
-                                                            val bitmap = imageProxyToBitmap(image)
-                                                            Log.d("Camera", "Bitmap変換完了")
-
-                                                            // メインスレッドで状態を更新
-                                                            ContextCompat.getMainExecutor(context).execute {
-                                                                cameraProvider?.unbindAll()
-                                                                capturedImage = bitmap
-                                                                isCameraMode = false
-                                                                errorMessage = ""
-                                                            }
-                                                        } catch (e: Exception) {
-                                                            Log.e("Camera", "エラー", e)
-                                                        } finally {
-                                                            image.close()
-                                                        }
-                                                    }
-
-                                                    override fun onError(exception: ImageCaptureException) {
-                                                        Log.e("Camera", "撮影失敗: ${exception.message}")
-                                                    }
+                                            cameraManager.takePicture(
+                                                imageCapture,
+                                                onSuccess = { bitmap ->
+                                                    Log.d("Camera", "撮影成功")
+                                                    cameraManager.stopCamera()
+                                                    capturedImage = bitmap
+                                                    isCameraMode = false
+                                                    errorMessage = ""
+                                                },
+                                                onError = { e ->
+                                                    Log.e("Camera", "撮影失敗", e)
                                                 }
                                             )
                                         } ?: run {
@@ -386,8 +334,7 @@ class MainActivity : ComponentActivity() {
                                             isSaving = true
                                             saveMessage = ""
                                             capturedImage?.let { bitmap ->
-                                                saveScanResult(
-                                                    context = context,
+                                                storage.saveScanResult(
                                                     bitmap = bitmap,
                                                     detectionBox = detectedBox,
                                                     scanCode = scannedCode,
@@ -455,204 +402,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    private fun detectBarcodeInBitmap(bitmap: Bitmap, onResult: (List<Barcode>) -> Unit) {
-        val scanner = BarcodeScanning.getClient()
-        val image = InputImage.fromBitmap(bitmap, 0)
-
-        scanner.process(image)
-            .addOnSuccessListener { barcodes ->
-                onResult(barcodes)
-            }
-            .addOnFailureListener { e ->
-                Log.e("BarcodeDetector", "検知失敗", e)
-                onResult(emptyList())
-            }
-    }
-
-    private fun scanBitmapForBarcode(bitmap: Bitmap, onResult: (Barcode?) -> Unit) {
-        val scanner = BarcodeScanning.getClient()
-        val image = InputImage.fromBitmap(bitmap, 0)
-
-        scanner.process(image)
-            .addOnSuccessListener { barcodes ->
-                onResult(barcodes.firstOrNull())
-            }
-            .addOnFailureListener { e ->
-                Log.e("BarcodeScanner", "スキャン失敗", e)
-                onResult(null)
-            }
-    }
-
-    private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap {
-        val width = imageProxy.width
-        val height = imageProxy.height
-
-        try {
-            if (imageProxy.planes.size == 1) {
-                val buffer = imageProxy.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-
-                if (bitmap != null) {
-                    val rotation = imageProxy.imageInfo.rotationDegrees
-                    if (rotation != 0) {
-                        val matrix = Matrix()
-                        matrix.postRotate(rotation.toFloat())
-                        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                    }
-                    return bitmap
-                }
-            }
-
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            bitmap.eraseColor(android.graphics.Color.RED)
-            return bitmap
-
-        } catch (e: Exception) {
-            Log.e("BarcodeAnalyzer", "Bitmap変換エラー", e)
-            val errorBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            errorBitmap.eraseColor(android.graphics.Color.BLUE)
-            return errorBitmap
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun saveScanResult(
-        context: Context,
-        bitmap: Bitmap,
-        detectionBox: Rect?,
-        scanCode: String,
-        scanType: String,
-        timestamp: String,
-        onComplete: (Boolean, String) -> Unit
-    ) {
-        try {
-            // 緑枠を描画したBitmapを作成
-            val bitmapWithFrame = createBitmapWithFrame(bitmap, detectionBox)
-
-            // リサイズ（縦を1024pxに）
-            val resizedBitmap = resizeBitmap(bitmapWithFrame, 1024)
-
-            // タイムスタンプから日付とファイル名を分離
-            val dateFolder = timestamp.substring(0, 8) // yyyyMMdd
-            val fileName = timestamp.substring(9) // HHmmss
-
-            // Downloadsフォルダに保存（Android 10以降で確実に動作）
-            // テキストファイル保存
-            val textValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.txt")
-                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
-            }
-
-            val textUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                textValues
-            )
-
-            textUri?.let { uri ->
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    val textContent = "種類: $scanType\n内容: $scanCode\n日時: $timestamp"
-                    out.write(textContent.toByteArray())
-                }
-                Log.d("SaveResult", "テキスト保存成功: $uri")
-            }
-
-            // 画像ファイル保存
-            val imageValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.jpg")
-                put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
-            }
-
-            val imageUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                imageValues
-            )
-
-            imageUri?.let { uri ->
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-                }
-                Log.d("SaveResult", "画像保存成功: $uri")
-            }
-
-            if (textUri != null && imageUri != null) {
-                onComplete(true, "保存成功: Download/BarcodeScanner/$dateFolder/")
-                Log.d("SaveResult", "保存完了")
-            } else {
-                onComplete(false, "保存失敗: URIの作成に失敗")
-                Log.e("SaveResult", "textUri=$textUri, imageUri=$imageUri")
-            }
-        } catch (e: Exception) {
-            Log.e("SaveResult", "保存失敗", e)
-            e.printStackTrace()
-            onComplete(false, "保存失敗: ${e.message}")
-        }
-    }
-
-    private fun createBitmapWithFrame(originalBitmap: Bitmap, detectionBox: Rect?): Bitmap {
-        val mutableBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
-        val canvas = android.graphics.Canvas(mutableBitmap)
-
-        // 検知枠を描画
-        detectionBox?.let { box ->
-            Log.d("SaveResult", "描画する枠: left=${box.left}, top=${box.top}, right=${box.right}, bottom=${box.bottom}")
-            Log.d("SaveResult", "Bitmapサイズ: ${mutableBitmap.width}x${mutableBitmap.height}")
-
-            val paint = android.graphics.Paint().apply {
-                color = android.graphics.Color.argb(153, 0, 255, 0) // 60%透明度の緑
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = 8f
-            }
-
-            // Rectをそのまま描画
-            canvas.drawRect(
-                box.left.toFloat(),
-                box.top.toFloat(),
-                box.right.toFloat(),
-                box.bottom.toFloat(),
-                paint
-            )
-
-            Log.d("SaveResult", "枠描画完了")
-        } ?: run {
-            Log.e("SaveResult", "detectionBoxがnull")
-        }
-
-        return mutableBitmap
-    }
-
-    private fun resizeBitmap(bitmap: Bitmap, targetHeight: Int): Bitmap {
-        val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-        val targetWidth = (targetHeight * aspectRatio).toInt()
-
-        return Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
-    }
 }
 
-// build.gradle.kts (Module: app) に以下を追加:
-/*
-dependencies {
-    // CameraX
-    implementation("androidx.camera:camera-camera2:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    implementation("androidx.camera:camera-view:1.3.1")
-
-    // ML Kit Barcode Scanning
-    implementation("com.google.mlkit:barcode-scanning:17.2.0")
-
-    // Jetpack Compose
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.compose.material3:material3:1.1.2")
-    implementation("androidx.compose.ui:ui:1.5.4")
-}
-*/
-
-// AndroidManifest.xml に以下を追加:
-/*
-<uses-feature android:name="android.hardware.camera" />
-<uses-permission android:name="android.permission.CAMERA" />
-*/
+// 新しいクラスファイルを作成してください：
+// - barcode/BarcodeProcessor.kt
+// - camera/CameraManager.kt
+// - storage/ScanResultStorage.kt
