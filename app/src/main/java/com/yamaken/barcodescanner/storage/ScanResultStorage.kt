@@ -5,15 +5,18 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 
 class ScanResultStorage(private val context: Context) {
 
     /**
      * スキャン結果を保存
      */
+    @RequiresApi(Build.VERSION_CODES.Q)
     fun saveScanResult(
         bitmap: Bitmap,
         detectionBox: Rect?,
