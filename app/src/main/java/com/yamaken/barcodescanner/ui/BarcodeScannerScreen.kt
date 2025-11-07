@@ -1,0 +1,163 @@
+// ui/BarcodeScannerScreen.kt
+package com.yamaken.barcodescanner.ui
+
+import android.graphics.Bitmap
+import android.graphics.Rect
+import androidx.camera.core.ImageCapture
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.yamaken.barcodescanner.barcode.BarcodeProcessor
+import com.yamaken.barcodescanner.camera.CameraManager
+import com.yamaken.barcodescanner.storage.ScanResultStorage
+import com.yamaken.barcodescanner.ui.components.CameraPreviewArea
+import com.yamaken.barcodescanner.ui.components.CapturedImageArea
+import com.yamaken.barcodescanner.ui.components.ControlFooter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@Composable
+fun BarcodeScannerScreen(
+    cameraManager: CameraManager,
+    barcodeProcessor: BarcodeProcessor,
+    storage: ScanResultStorage
+) {
+    // val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 状態管理
+    var isCameraMode by remember { mutableStateOf(true) }
+    var capturedImage by remember { mutableStateOf<Bitmap?>(null) }
+    var detectionBox by remember { mutableStateOf<Rect?>(null) }
+    var barcodeDetected by remember { mutableStateOf(false) }
+    var scannedCode by remember { mutableStateOf("") }
+    var codeType by remember { mutableStateOf("") }
+    var isDetecting by remember { mutableStateOf(false) }
+    var isScanning by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var saveMessage by remember { mutableStateOf("") }
+    var scanTimestamp by remember { mutableStateOf("") }
+    var detectedBox by remember { mutableStateOf<Rect?>(null) }
+    var currentImageCapture: ImageCapture? by remember { mutableStateOf(null) }
+    var isSaved by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // カメラ/静止画表示エリア
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            if (isCameraMode) {
+                CameraPreviewArea(
+                    cameraManager = cameraManager,
+                    lifecycleOwner = lifecycleOwner,
+                    onImageCaptureReady = { imageCapture ->
+                        currentImageCapture = imageCapture
+                    }
+                )
+            } else {
+                CapturedImageArea(
+                    bitmap = capturedImage,
+                    detectionBox = detectionBox,
+                    barcodeDetected = barcodeDetected
+                )
+            }
+        }
+
+        // フッター
+        ControlFooter(
+            isCameraMode = isCameraMode,
+            barcodeDetected = barcodeDetected,
+            scannedCode = scannedCode,
+            codeType = codeType,
+            isDetecting = isDetecting,
+            isScanning = isScanning,
+            isSaving = isSaving,
+            isSaved = isSaved,
+            errorMessage = errorMessage,
+            saveMessage = saveMessage,
+            onRetakeClick = {
+                isCameraMode = true
+                capturedImage = null
+                detectionBox = null
+                barcodeDetected = false
+                scannedCode = ""
+                codeType = ""
+                errorMessage = ""
+                saveMessage = ""
+            },
+            onDetectClick = {
+                isDetecting = true
+                errorMessage = ""
+                capturedImage?.let { bitmap ->
+                    barcodeProcessor.detectBarcode(bitmap) { barcodes ->
+                        if (barcodes.isNotEmpty()) {
+                            barcodeDetected = true
+                            detectionBox = barcodes.first().boundingBox
+                            detectedBox = barcodes.first().boundingBox
+                        } else {
+                            barcodeDetected = false
+                            detectionBox = null
+                            errorMessage = "バーコードが見つかりませんでした"
+                        }
+                        isDetecting = false
+                    }
+                }
+            },
+            onScanClick = {
+                isScanning = true
+                capturedImage?.let { bitmap ->
+                    barcodeProcessor.scanBarcode(bitmap) { barcode ->
+                        barcode?.let {
+                            scannedCode = it.rawValue ?: ""
+                            codeType = barcodeProcessor.getBarcodeTypeName(it.format)
+                            val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                            scanTimestamp = sdf.format(Date())
+                        }
+                        isScanning = false
+                    }
+                }
+            },
+            onShutterClick = {
+                currentImageCapture?.let { imageCapture ->
+                    cameraManager.takePicture(
+                        imageCapture,
+                        onSuccess = { bitmap ->
+                            cameraManager.stopCamera()
+                            capturedImage = bitmap
+                            isCameraMode = false
+                            errorMessage = ""
+                        },
+                        onError = { e ->
+                            errorMessage = "撮影失敗"
+                        }
+                    )
+                }
+            },
+            onSaveClick = {
+                isSaved = false
+                isSaving = true
+                saveMessage = ""
+                capturedImage?.let { bitmap ->
+                    storage.saveScanResult(
+                        bitmap = bitmap,
+                        detectionBox = detectedBox,
+                        scanCode = scannedCode,
+                        scanType = codeType,
+                        timestamp = scanTimestamp
+                    ) { success, message ->
+                        isSaved = true
+                        isSaving = false
+                        saveMessage = message
+                    }
+                }
+            }
+        )
+    }
+}
