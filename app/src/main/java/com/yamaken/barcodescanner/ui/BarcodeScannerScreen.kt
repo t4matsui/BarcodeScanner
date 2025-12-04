@@ -123,6 +123,7 @@ fun BarcodeScannerScreen(
                         isScanning = false
                     }
                 }
+                isSaved = false
             },
             onShutterClick = {
                 currentImageCapture?.let { imageCapture ->
