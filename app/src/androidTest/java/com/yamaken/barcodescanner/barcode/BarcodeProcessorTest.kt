@@ -1,6 +1,7 @@
 package com.yamaken.barcodescanner.barcode
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import com.google.android.gms.tasks.OnFailureListener
 import com.google.android.gms.tasks.OnSuccessListener
 import com.google.android.gms.tasks.Task
@@ -51,11 +52,12 @@ class BarcodeProcessorTest {
     }
 
     @Test
-    fun detectBarcode_returnsResultOnSuccess() {
+    fun detectBarcodes_returnsMultipleBarcodesOnSuccess() {
         // Given
         val mockBarcode1 = mockk<Barcode>(relaxed = true)
         val mockBarcode2 = mockk<Barcode>(relaxed = true)
-        val expectedBarcodes = listOf(mockBarcode1, mockBarcode2)
+        val mockBarcode3 = mockk<Barcode>(relaxed = true)
+        val expectedBarcodes = listOf(mockBarcode1, mockBarcode2, mockBarcode3)
 
         var resultBarcodes: List<Barcode>? = null
         val callback: (List<Barcode>) -> Unit = { barcodes ->
@@ -72,21 +74,21 @@ class BarcodeProcessorTest {
         every { mockTask.addOnFailureListener(any()) } returns mockTask
 
         // When
-        barcodeProcessor.detectBarcode(mockBitmap, callback)
+        barcodeProcessor.detectBarcodes(mockBitmap, callback)
 
         // Then
         assertEquals(expectedBarcodes, resultBarcodes)
-        assertEquals(2, resultBarcodes?.size)
+        assertEquals(3, resultBarcodes?.size)
     }
 
     @Test
-    fun detectBarcode_returnsEmptyListOnFailure() {
+    fun detectBarcodes_returnsEmptyListOnFailure() {
         // Given
         var resultBarcodes: List<Barcode>? = null
         val callback: (List<Barcode>) -> Unit = { barcodes ->
             resultBarcodes = barcodes
         }
-        val exception = RuntimeException("Scan failed")
+        val exception = RuntimeException("Detection failed")
 
         every { mockScanner.process(any<InputImage>()) } returns mockTask
         every { mockTask.addOnSuccessListener(any()) } returns mockTask
@@ -97,7 +99,7 @@ class BarcodeProcessorTest {
         }
 
         // When
-        barcodeProcessor.detectBarcode(mockBitmap, callback)
+        barcodeProcessor.detectBarcodes(mockBitmap, callback)
 
         // Then
         assertNotNull(resultBarcodes)
@@ -105,38 +107,11 @@ class BarcodeProcessorTest {
     }
 
     @Test
-    fun scanBarcode_returnsFirstBarcodeOnSuccess() {
+    fun detectBarcodes_returnsEmptyListWhenNoBarcodesFound() {
         // Given
-        val mockBarcode1 = mockk<Barcode>(relaxed = true)
-        val mockBarcode2 = mockk<Barcode>(relaxed = true)
-        val barcodes = listOf(mockBarcode1, mockBarcode2)
-
-        var resultBarcode: Barcode? = null
-        val callback: (Barcode?) -> Unit = { barcode ->
-            resultBarcode = barcode
-        }
-
-        every { mockScanner.process(any<InputImage>()) } returns mockTask
-        every { mockTask.addOnSuccessListener(any()) } answers {
-            val listener = firstArg<OnSuccessListener<List<Barcode>>>()
-            listener.onSuccess(barcodes)
-            mockTask
-        }
-        every { mockTask.addOnFailureListener(any()) } returns mockTask
-
-        // When
-        barcodeProcessor.scanBarcode(mockBitmap, callback)
-
-        // Then
-        assertEquals(mockBarcode1, resultBarcode)
-    }
-
-    @Test
-    fun scanBarcode_returnsNullWhenNoBarcodeFound() {
-        // Given
-        var resultBarcode: Barcode? = null
-        val callback: (Barcode?) -> Unit = { barcode ->
-            resultBarcode = barcode
+        var resultBarcodes: List<Barcode>? = null
+        val callback: (List<Barcode>) -> Unit = { barcodes ->
+            resultBarcodes = barcodes
         }
 
         every { mockScanner.process(any<InputImage>()) } returns mockTask
@@ -148,34 +123,56 @@ class BarcodeProcessorTest {
         every { mockTask.addOnFailureListener(any()) } returns mockTask
 
         // When
-        barcodeProcessor.scanBarcode(mockBitmap, callback)
+        barcodeProcessor.detectBarcodes(mockBitmap, callback)
 
         // Then
-        assertNull(resultBarcode)
+        assertNotNull(resultBarcodes)
+        assertTrue(resultBarcodes!!.isEmpty())
     }
 
     @Test
-    fun scanBarcode_returnsNullOnFailure() {
+    fun scanSpecificBarcode_returnsCodeAndType() {
         // Given
-        var resultBarcode: Barcode? = null
-        val callback: (Barcode?) -> Unit = { barcode ->
-            resultBarcode = barcode
-        }
-        val exception = RuntimeException("Scan failed")
-
-        every { mockScanner.process(any<InputImage>()) } returns mockTask
-        every { mockTask.addOnSuccessListener(any()) } returns mockTask
-        every { mockTask.addOnFailureListener(any()) } answers {
-            val listener = firstArg<OnFailureListener>()
-            listener.onFailure(exception)
-            mockTask
-        }
+        val mockBarcode = mockk<Barcode>(relaxed = true)
+        every { mockBarcode.rawValue } returns "1234567890123"
+        every { mockBarcode.format } returns Barcode.FORMAT_EAN_13
 
         // When
-        barcodeProcessor.scanBarcode(mockBitmap, callback)
+        val result = barcodeProcessor.scanSpecificBarcode(mockBarcode)
 
         // Then
-        assertNull(resultBarcode)
+        assertEquals("1234567890123", result.first)
+        assertEquals("EAN-13", result.second)
+    }
+
+    @Test
+    fun scanSpecificBarcode_returnsEmptyStringWhenRawValueIsNull() {
+        // Given
+        val mockBarcode = mockk<Barcode>(relaxed = true)
+        every { mockBarcode.rawValue } returns null
+        every { mockBarcode.format } returns Barcode.FORMAT_QR_CODE
+
+        // When
+        val result = barcodeProcessor.scanSpecificBarcode(mockBarcode)
+
+        // Then
+        assertEquals("", result.first)
+        assertEquals("QRコード", result.second)
+    }
+
+    @Test
+    fun scanSpecificBarcode_handlesQRCode() {
+        // Given
+        val mockBarcode = mockk<Barcode>(relaxed = true)
+        every { mockBarcode.rawValue } returns "https://example.com"
+        every { mockBarcode.format } returns Barcode.FORMAT_QR_CODE
+
+        // When
+        val result = barcodeProcessor.scanSpecificBarcode(mockBarcode)
+
+        // Then
+        assertEquals("https://example.com", result.first)
+        assertEquals("QRコード", result.second)
     }
 
     @Test
@@ -221,6 +218,51 @@ class BarcodeProcessorTest {
 
         // Then
         assertEquals("CODE-39", result)
+    }
+
+    @Test
+    fun getBarcodeTypeName_returnsCODE93ForCODE93Format() {
+        // When
+        val result = barcodeProcessor.getBarcodeTypeName(Barcode.FORMAT_CODE_93)
+
+        // Then
+        assertEquals("CODE-93", result)
+    }
+
+    @Test
+    fun getBarcodeTypeName_returnsCODABARForCODABARFormat() {
+        // When
+        val result = barcodeProcessor.getBarcodeTypeName(Barcode.FORMAT_CODABAR)
+
+        // Then
+        assertEquals("CODABAR", result)
+    }
+
+    @Test
+    fun getBarcodeTypeName_returnsITFForITFFormat() {
+        // When
+        val result = barcodeProcessor.getBarcodeTypeName(Barcode.FORMAT_ITF)
+
+        // Then
+        assertEquals("ITF", result)
+    }
+
+    @Test
+    fun getBarcodeTypeName_returnsUPCAForUPCAFormat() {
+        // When
+        val result = barcodeProcessor.getBarcodeTypeName(Barcode.FORMAT_UPC_A)
+
+        // Then
+        assertEquals("UPC-A", result)
+    }
+
+    @Test
+    fun getBarcodeTypeName_returnsUPCEForUPCEFormat() {
+        // When
+        val result = barcodeProcessor.getBarcodeTypeName(Barcode.FORMAT_UPC_E)
+
+        // Then
+        assertEquals("UPC-E", result)
     }
 
     @Test

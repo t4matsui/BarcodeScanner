@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ButtonArea(
     isCameraMode: Boolean,
-    barcodeDetected: Boolean,
+    barcodesDetected: Boolean,
+    barcodeSelected: Boolean,
     scannedCode: String,
     isDetecting: Boolean,
     isScanning: Boolean,
@@ -43,7 +44,7 @@ fun ButtonArea(
                 Button(
                     onClick = onDetectClick,
                     modifier = Modifier.weight(1f),
-                    enabled = !isDetecting && !barcodeDetected && scannedCode.isEmpty()
+                    enabled = !isDetecting && !barcodesDetected && scannedCode.isEmpty()
                 ) {
                     Text(text = if (isDetecting) "検知中..." else "検知")
                 }
@@ -51,7 +52,7 @@ fun ButtonArea(
                 Button(
                     onClick = onScanClick,
                     modifier = Modifier.weight(1f),
-                    enabled = barcodeDetected && !isScanning
+                    enabled = barcodeSelected && !isScanning
                 ) {
                     Text(text = if (isScanning) "実行中..." else "スキャン")
                 }

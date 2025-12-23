@@ -105,4 +105,28 @@ dependencies {
 
     // Core library desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
+    // Google API Client for Android
+    implementation("com.google.android.gms:play-services-auth:21.0.0")
+    implementation("com.google.api-client:google-api-client-android:2.2.0") {
+        exclude(group = "org.apache.httpcomponents")
+        exclude(group = "com.google.guava")
+    }
+
+    // Google Drive API
+    implementation("com.google.apis:google-api-services-drive:v3-rev20231214-2.0.0") {
+        exclude(group = "org.apache.httpcomponents")
+        exclude(group = "com.google.guava")
+    }
+
+    // Google Sheets API
+    implementation("com.google.apis:google-api-services-sheets:v4-rev20231130-2.0.0") {
+        exclude(group = "org.apache.httpcomponents")
+        exclude(group = "com.google.guava")
+    }
+
+    // HTTP Transport
+    implementation("com.google.http-client:google-http-client-gson:1.43.3") {
+        exclude(group = "org.apache.httpcomponents")
+    }
 }

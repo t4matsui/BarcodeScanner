@@ -10,7 +10,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ControlFooter(
     isCameraMode: Boolean,
-    barcodeDetected: Boolean,
+    barcodesDetected: Boolean,
+    barcodeSelected: Boolean,
+    detectedCount: Int,
     scannedCode: String,
     codeType: String,
     isDetecting: Boolean,
@@ -41,7 +43,8 @@ fun ControlFooter(
             // ボタンエリア
             ButtonArea(
                 isCameraMode = isCameraMode,
-                barcodeDetected = barcodeDetected,
+                barcodesDetected = barcodesDetected,
+                barcodeSelected = barcodeSelected,
                 scannedCode = scannedCode,
                 isDetecting = isDetecting,
                 isScanning = isScanning,
@@ -54,7 +57,9 @@ fun ControlFooter(
             // メッセージエリア
             MessageArea(
                 isCameraMode = isCameraMode,
-                barcodeDetected = barcodeDetected,
+                barcodesDetected = barcodesDetected,
+                barcodeSelected = barcodeSelected,
+                detectedCount = detectedCount,
                 scannedCode = scannedCode,
                 codeType = codeType,
                 errorMessage = errorMessage,

@@ -11,7 +11,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun MessageArea(
     isCameraMode: Boolean,
-    barcodeDetected: Boolean,
+    barcodesDetected: Boolean,
+    barcodeSelected: Boolean,
+    detectedCount: Int,
     scannedCode: String,
     codeType: String,
     errorMessage: String,
@@ -30,7 +32,8 @@ fun MessageArea(
                 Text(
                     text = when {
                         scannedCode.isNotEmpty() -> "読み取り完了"
-                        barcodeDetected -> "バーコード検知完了"
+                        barcodeSelected -> "スキャンボタンを押してください"
+                        barcodesDetected -> "枠を選択してください (${detectedCount}個検知)"
                         errorMessage.isNotEmpty() -> "エラー"
                         else -> "検知ボタンを押してください"
                     },
@@ -77,9 +80,9 @@ fun MessageArea(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
-            } else if (barcodeDetected) {
+            } else if (barcodesDetected && !barcodeSelected) {
                 Text(
-                    text = "スキャンボタンを押してください",
+                    text = "画面上の緑枠をタップして選択してください",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
