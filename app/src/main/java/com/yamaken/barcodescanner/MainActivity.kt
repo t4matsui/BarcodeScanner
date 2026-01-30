@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraManager: CameraManager
     private lateinit var storage: ScanResultStorage
 
+    // カメラ権限リクエスト
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
         cameraManager = CameraManager(this, cameraExecutor)
         storage = ScanResultStorage(this)
 
+        // カメラ権限チェック
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.CAMERA
             ) != PackageManager.PERMISSION_GRANTED

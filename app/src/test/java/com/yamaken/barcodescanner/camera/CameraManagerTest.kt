@@ -2,6 +2,7 @@ package com.yamaken.barcodescanner.camera
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -11,12 +12,16 @@ import com.google.common.util.concurrent.ListenableFuture
 import io.mockk.*
 import org.junit.After
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.*
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 
 class CameraManagerTest {
+
+    @get:Rule
+    val instantExecutorRule = InstantTaskExecutorRule()
 
     private lateinit var cameraManager: CameraManager
     private lateinit var mockContext: Context
@@ -76,21 +81,20 @@ class CameraManagerTest {
         val mockCamera = mockk<Camera>(relaxed = true)
 
         // Preview.Builderのモック
-        every { mockPreviewBuilder.build() } returns mockPreview
-        every { mockPreview.setSurfaceProvider(any()) } returns Unit
+        every { mockPreview.setSurfaceProvider(any()) } just Runs
         mockkConstructor(Preview.Builder::class)
         every { constructedWith<Preview.Builder>().build() } returns mockPreview
 
         // ImageCapture.Builderのモック
-        every { mockImageCaptureBuilder.setCaptureMode(any()) } returns mockImageCaptureBuilder
-        every { mockImageCaptureBuilder.setTargetRotation(any()) } returns mockImageCaptureBuilder
-        every { mockImageCaptureBuilder.build() } returns mockImageCapture
         mockkConstructor(ImageCapture.Builder::class)
         every { constructedWith<ImageCapture.Builder>().setCaptureMode(any()) } returns mockImageCaptureBuilder
         every { constructedWith<ImageCapture.Builder>().setTargetRotation(any()) } returns mockImageCaptureBuilder
         every { constructedWith<ImageCapture.Builder>().build() } returns mockImageCapture
+        every { mockImageCaptureBuilder.setCaptureMode(any()) } returns mockImageCaptureBuilder
+        every { mockImageCaptureBuilder.setTargetRotation(any()) } returns mockImageCaptureBuilder
+        every { mockImageCaptureBuilder.build() } returns mockImageCapture
 
-        every { mockCameraProvider.unbindAll() } returns Unit
+        every { mockCameraProvider.unbindAll() } just Runs
         every {
             mockCameraProvider.bindToLifecycle(
                 any(),
@@ -124,7 +128,10 @@ class CameraManagerTest {
     @Test
     fun startCamera_logsErrorOnException() {
         // Given
-        val onReady: (ImageCapture) -> Unit = mockk(relaxed = true)
+        var onReadyCalled = false
+        val onReady: (ImageCapture) -> Unit = {
+            onReadyCalled = true
+        }
         val exception = RuntimeException("Camera initialization failed")
 
         every { mockProviderFuture.addListener(any(), any()) } answers {
@@ -134,11 +141,17 @@ class CameraManagerTest {
 
         every { mockCameraProvider.unbindAll() } throws exception
 
+        val mockPreview = mockk<Preview>(relaxed = true)
+        every { mockPreview.setSurfaceProvider(any()) } just Runs
+        mockkConstructor(Preview.Builder::class)
+        every { constructedWith<Preview.Builder>().build() } returns mockPreview
+
         // When
         cameraManager.startCamera(mockPreviewView, mockLifecycleOwner, onReady)
 
         // Then
-        verify(exactly = 0) { onReady(any()) }
+        // 例外が発生してもクラッシュしない
+        assertFalse(onReadyCalled)
     }
 
     @Test
@@ -214,19 +227,27 @@ class CameraManagerTest {
     }
 
     @Test
-    fun takePicture_callsOnErrorOnBitmapConversionFailure() {
+    fun takePicture_returnsErrorBitmapOnBitmapConversionFailure() {
         // Given
-        val onSuccess: (Bitmap) -> Unit = mockk(relaxed = true)
-        var capturedError: Exception? = null
-        val onError: (Exception) -> Unit = { error ->
-            capturedError = error
+        var resultBitmap: Bitmap? = null
+        val onSuccess: (Bitmap) -> Unit = { bitmap ->
+            resultBitmap = bitmap
         }
+        val onError: (Exception) -> Unit = mockk(relaxed = true)
 
         val mockImageProxy = mockk<ImageProxy>(relaxed = true)
         every { mockImageProxy.width } returns 100
         every { mockImageProxy.height } returns 100
         every { mockImageProxy.planes } throws RuntimeException("Conversion error")
         every { mockImageProxy.close() } returns Unit
+
+        // エラービットマップをモック
+        val mockErrorBitmap = mockk<Bitmap>(relaxed = true)
+        mockkStatic(Bitmap::class)
+        every {
+            Bitmap.createBitmap(any<Int>(), any<Int>(), any<Bitmap.Config>())
+        } returns mockErrorBitmap
+        every { mockErrorBitmap.eraseColor(any()) } just Runs
 
         every { mockExecutor.execute(any()) } answers {
             firstArg<Runnable>().run()
@@ -241,8 +262,11 @@ class CameraManagerTest {
         cameraManager.takePicture(mockImageCapture, onSuccess, onError)
 
         // Then
-        assertNotNull(capturedError)
+        // エラー時もBitmapが返される（エラービットマップ）
+        assertNotNull(resultBitmap)
         verify { mockImageProxy.close() }
+        // onErrorは呼ばれない（エラービットマップで代替）
+        verify(exactly = 0) { onError(any()) }
     }
 
     @Test

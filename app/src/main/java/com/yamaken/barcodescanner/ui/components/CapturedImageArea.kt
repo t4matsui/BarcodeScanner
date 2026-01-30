@@ -63,16 +63,17 @@ fun CapturedImageArea(
             val offsetX = (size.width - scaledWidth) / 2
             val offsetY = (size.height - scaledHeight) / 2
 
-            // 選択された枠のみ、または全ての枠を描画
-            val boxesToDraw = if (selectedBoxIndex != null) {
-                listOf(detectionBoxes[selectedBoxIndex])
-            } else {
-                detectionBoxes
-            }
+            // 全ての枠を描画
+            detectionBoxes.forEachIndexed { index, box ->
+                val isSelected = selectedBoxIndex == index
+                val color = if (isSelected) {
+                    Color(0xFFFF0066)  // 赤枠（選択時）
+                } else {
+                    Color.Green  // 緑枠（未選択時）
+                }
 
-            boxesToDraw.forEach { box ->
                 drawRect(
-                    color = Color.Green.copy(alpha = 0.6f),
+                    color = color.copy(alpha = 0.6f),
                     topLeft = Offset(
                         offsetX + box.left * scale,
                         offsetY + box.top * scale

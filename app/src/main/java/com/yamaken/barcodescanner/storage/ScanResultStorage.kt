@@ -12,7 +12,7 @@ import android.util.Log
 class ScanResultStorage(private val context: Context) {
 
     /**
-     * スキャン結果を保存
+     * スキャン結果を本体ストレージに保存
      */
     fun saveScanResult(
         bitmap: Bitmap,

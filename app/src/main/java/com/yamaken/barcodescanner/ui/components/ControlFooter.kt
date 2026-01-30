@@ -10,27 +10,18 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ControlFooter(
     isCameraMode: Boolean,
-    barcodesDetected: Boolean,
-    barcodeSelected: Boolean,
-    detectedCount: Int,
-    scannedCode: String,
-    codeType: String,
     isDetecting: Boolean,
-    isScanning: Boolean,
-    isSaving: Boolean,
-    isSaved: Boolean,
+    detectedCount: Int,
+    isProcessing: Boolean,
+    processMessage: String,
     errorMessage: String,
-    saveMessage: String,
     onRetakeClick: () -> Unit,
-    onDetectClick: () -> Unit,
-    onScanClick: () -> Unit,
-    onShutterClick: () -> Unit,
-    onSaveClick: () -> Unit
+    onShutterClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp),
+            .height(160.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp
     ) {
@@ -43,30 +34,18 @@ fun ControlFooter(
             // ボタンエリア
             ButtonArea(
                 isCameraMode = isCameraMode,
-                barcodesDetected = barcodesDetected,
-                barcodeSelected = barcodeSelected,
-                scannedCode = scannedCode,
-                isDetecting = isDetecting,
-                isScanning = isScanning,
                 onRetakeClick = onRetakeClick,
-                onDetectClick = onDetectClick,
-                onScanClick = onScanClick,
                 onShutterClick = onShutterClick
             )
 
             // メッセージエリア
             MessageArea(
                 isCameraMode = isCameraMode,
-                barcodesDetected = barcodesDetected,
-                barcodeSelected = barcodeSelected,
+                isDetecting = isDetecting,
                 detectedCount = detectedCount,
-                scannedCode = scannedCode,
-                codeType = codeType,
-                errorMessage = errorMessage,
-                saveMessage = saveMessage,
-                isSaving = isSaving,
-                isSaved = isSaved,
-                onSaveClick = onSaveClick
+                isProcessing = isProcessing,
+                processMessage = processMessage,
+                errorMessage = errorMessage
             )
         }
     }

@@ -15,6 +15,7 @@ import com.yamaken.barcodescanner.storage.ScanResultStorage
 import com.yamaken.barcodescanner.ui.components.CameraPreviewArea
 import com.yamaken.barcodescanner.ui.components.CapturedImageArea
 import com.yamaken.barcodescanner.ui.components.ControlFooter
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,6 +27,7 @@ fun BarcodeScannerScreen(
     storage: ScanResultStorage
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
     // 状態管理
     var isCameraMode by remember { mutableStateOf(true) }
@@ -33,16 +35,11 @@ fun BarcodeScannerScreen(
     var detectedBarcodes by remember { mutableStateOf<List<Barcode>>(emptyList()) }
     var detectionBoxes by remember { mutableStateOf<List<Rect>>(emptyList()) }
     var selectedBoxIndex by remember { mutableStateOf<Int?>(null) }
-    var scannedCode by remember { mutableStateOf("") }
-    var codeType by remember { mutableStateOf("") }
     var isDetecting by remember { mutableStateOf(false) }
-    var isScanning by remember { mutableStateOf(false) }
+    var isProcessing by remember { mutableStateOf(false) }
+    var processMessage by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-    var isSaving by remember { mutableStateOf(false) }
-    var saveMessage by remember { mutableStateOf("") }
-    var scanTimestamp by remember { mutableStateOf("") }
     var currentImageCapture: ImageCapture? by remember { mutableStateOf(null) }
-    var isSaved by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize()
@@ -67,7 +64,68 @@ fun BarcodeScannerScreen(
                     detectionBoxes = detectionBoxes,
                     selectedBoxIndex = selectedBoxIndex,
                     onBoxSelected = { index ->
+                        if (isProcessing) return@CapturedImageArea
+
                         selectedBoxIndex = index
+                        isProcessing = true
+                        processMessage = "スキャン中..."
+                        errorMessage = ""
+
+                        // 選択されたバーコードをスキャン
+                        val selectedBarcode = detectedBarcodes[index]
+                        val result = barcodeProcessor.scanSpecificBarcode(selectedBarcode)
+                        val scannedCode = result.first
+                        val codeType = result.second
+
+                        if (scannedCode.isEmpty()) {
+                            isProcessing = false
+                            processMessage = ""
+                            errorMessage = "スキャン失敗"
+                            selectedBoxIndex = null
+                            return@CapturedImageArea
+                        }
+
+                        processMessage = "保存中..."
+
+                        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                        val scanTimestamp = sdf.format(Date())
+
+                        capturedImage?.let { bitmap ->
+                            val selectedBox = detectionBoxes[index]
+
+                            // 本体ストレージに保存
+                            storage.saveScanResult(
+                                bitmap = bitmap,
+                                detectionBox = selectedBox,
+                                scanCode = scannedCode,
+                                scanType = codeType,
+                                timestamp = scanTimestamp
+                            ) { localSuccess, localMessage ->
+                                if (localSuccess) {
+                                    processMessage = "保存完了"
+
+                                    // 1秒後にカメラモードに戻る
+                                    scope.launch {
+                                        kotlinx.coroutines.delay(1000)
+
+                                        // リセット
+                                        isCameraMode = true
+                                        capturedImage = null
+                                        detectedBarcodes = emptyList()
+                                        detectionBoxes = emptyList()
+                                        selectedBoxIndex = null
+                                        isProcessing = false
+                                        processMessage = ""
+                                        errorMessage = ""
+                                    }
+                                } else {
+                                    isProcessing = false
+                                    processMessage = ""
+                                    errorMessage = "保存失敗: $localMessage"
+                                    selectedBoxIndex = null
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -76,17 +134,11 @@ fun BarcodeScannerScreen(
         // フッター
         ControlFooter(
             isCameraMode = isCameraMode,
-            barcodesDetected = detectedBarcodes.isNotEmpty(),
-            barcodeSelected = selectedBoxIndex != null,
-            detectedCount = detectedBarcodes.size,
-            scannedCode = scannedCode,
-            codeType = codeType,
             isDetecting = isDetecting,
-            isScanning = isScanning,
-            isSaving = isSaving,
-            isSaved = isSaved,
+            detectedCount = detectedBarcodes.size,
+            isProcessing = isProcessing,
+            processMessage = processMessage,
             errorMessage = errorMessage,
-            saveMessage = saveMessage,
             onRetakeClick = {
                 // リセット
                 isCameraMode = true
@@ -94,44 +146,9 @@ fun BarcodeScannerScreen(
                 detectedBarcodes = emptyList()
                 detectionBoxes = emptyList()
                 selectedBoxIndex = null
-                scannedCode = ""
-                codeType = ""
+                isProcessing = false
+                processMessage = ""
                 errorMessage = ""
-                saveMessage = ""
-                isSaved = false
-            },
-            onDetectClick = {
-                isDetecting = true
-                errorMessage = ""
-                capturedImage?.let { bitmap ->
-                    barcodeProcessor.detectBarcodes(bitmap) { barcodes ->
-                        if (barcodes.isNotEmpty()) {
-                            detectedBarcodes = barcodes
-                            detectionBoxes = barcodes.mapNotNull { it.boundingBox }
-                            selectedBoxIndex = null // 選択をリセット
-                        } else {
-                            detectedBarcodes = emptyList()
-                            detectionBoxes = emptyList()
-                            errorMessage = "バーコードが見つかりませんでした"
-                        }
-                        isDetecting = false
-                    }
-                }
-            },
-            onScanClick = {
-                isScanning = true
-                selectedBoxIndex?.let { index ->
-                    val selectedBarcode = detectedBarcodes[index]
-                    val result = barcodeProcessor.scanSpecificBarcode(selectedBarcode)
-                    scannedCode = result.first
-                    codeType = result.second
-
-                    val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
-                    scanTimestamp = sdf.format(Date())
-
-                    isScanning = false
-                    isSaved = false
-                }
             },
             onShutterClick = {
                 currentImageCapture?.let { imageCapture ->
@@ -142,39 +159,30 @@ fun BarcodeScannerScreen(
                             capturedImage = bitmap
                             isCameraMode = false
                             errorMessage = ""
+                            isProcessing = false
+                            processMessage = ""
+
                             // リセット
                             detectedBarcodes = emptyList()
                             detectionBoxes = emptyList()
                             selectedBoxIndex = null
-                            scannedCode = ""
-                            codeType = ""
+
+                            // 自動的に検知開始
+                            isDetecting = true
+                            barcodeProcessor.detectBarcodes(bitmap) { barcodes ->
+                                if (barcodes.isNotEmpty()) {
+                                    detectedBarcodes = barcodes
+                                    detectionBoxes = barcodes.mapNotNull { it.boundingBox }
+                                } else {
+                                    errorMessage = "バーコードが見つかりませんでした"
+                                }
+                                isDetecting = false
+                            }
                         },
                         onError = { e ->
                             errorMessage = "撮影失敗"
                         }
                     )
-                }
-            },
-            onSaveClick = {
-                isSaved = false
-                isSaving = true
-                saveMessage = ""
-
-                capturedImage?.let { bitmap ->
-                    selectedBoxIndex?.let { index ->
-                        val selectedBox = detectionBoxes[index]
-                        storage.saveScanResult(
-                            bitmap = bitmap,
-                            detectionBox = selectedBox,
-                            scanCode = scannedCode,
-                            scanType = codeType,
-                            timestamp = scanTimestamp
-                        ) { success, message ->
-                            isSaved = true
-                            isSaving = false
-                            saveMessage = message
-                        }
-                    }
                 }
             }
         )
