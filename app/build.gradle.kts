@@ -1,3 +1,5 @@
+// @file:Suppress("DSL_SCOPE_VIOLATION")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
@@ -64,7 +66,6 @@ android {
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -81,6 +82,8 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+
     // CameraX
     val cameraxVersion = "1.5.3"
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
@@ -88,23 +91,24 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
     // ML Kit Barcode Scanning
-    implementation("com.google.mlkit:barcode-scanning:17.2.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
     // Jetpack Compose
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.compose.material3:material3:1.1.2")
-    implementation("androidx.compose.ui:ui:1.5.4")
+    implementation("androidx.activity:activity-compose:1.12.3")
+    implementation("androidx.compose.material3:material3:1.4.0")
+    implementation("androidx.compose.ui:ui:1.10.2")
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
-    testImplementation("io.mockk:mockk:1.13.8")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("androidx.arch.core:core-testing:2.2.0")
 
     // Android Testing
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-    androidTestImplementation("io.mockk:mockk-android:1.13.8")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("io.mockk:mockk-android:1.49.9")
 
     // Core library desugaring
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }
