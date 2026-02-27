@@ -41,10 +41,26 @@ fun BarcodeScannerScreen(
     var errorMessage by remember { mutableStateOf("") }
     var currentImageCapture: ImageCapture? by remember { mutableStateOf(null) }
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // カメラ/静止画表示エリア
+    /** タイムスタンプ生成 */
+    fun makeTimestamp(): String =
+        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+
+    /** カメラ状態にリセット */
+    fun resetToCamera() {
+        isCameraMode = true
+        capturedImage = null
+        detectedBarcodes = emptyList()
+        detectionBoxes = emptyList()
+        selectedBoxIndex = null
+        isProcessing = false
+        processMessage = ""
+        errorMessage = ""
+        isDetecting = false
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // カメラ / 静止画エリア
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -54,9 +70,7 @@ fun BarcodeScannerScreen(
                 CameraPreviewArea(
                     cameraManager = cameraManager,
                     lifecycleOwner = lifecycleOwner,
-                    onImageCaptureReady = { imageCapture ->
-                        currentImageCapture = imageCapture
-                    }
+                    onImageCaptureReady = { currentImageCapture = it }
                 )
             } else {
                 CapturedImageArea(
@@ -71,11 +85,8 @@ fun BarcodeScannerScreen(
                         processMessage = "スキャン中..."
                         errorMessage = ""
 
-                        // 選択されたバーコードをスキャン
                         val selectedBarcode = detectedBarcodes[index]
-                        val result = barcodeProcessor.scanSpecificBarcode(selectedBarcode)
-                        val scannedCode = result.first
-                        val codeType = result.second
+                        val (scannedCode, codeType) = barcodeProcessor.scanSpecificBarcode(selectedBarcode)
 
                         if (scannedCode.isEmpty()) {
                             isProcessing = false
@@ -86,42 +97,26 @@ fun BarcodeScannerScreen(
                         }
 
                         processMessage = "保存中..."
-
-                        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
-                        val scanTimestamp = sdf.format(Date())
+                        val timestamp = makeTimestamp()
 
                         capturedImage?.let { bitmap ->
-                            val selectedBox = detectionBoxes[index]
-
-                            // 本体ストレージに保存
                             storage.saveScanResult(
                                 bitmap = bitmap,
-                                detectionBox = selectedBox,
+                                detectionBox = detectionBoxes[index],
                                 scanCode = scannedCode,
                                 scanType = codeType,
-                                timestamp = scanTimestamp
-                            ) { localSuccess, localMessage ->
-                                if (localSuccess) {
+                                timestamp = timestamp
+                            ) { success, message ->
+                                if (success) {
                                     processMessage = "保存完了"
-
-                                    // 1秒後にカメラモードに戻る
                                     scope.launch {
                                         kotlinx.coroutines.delay(1000)
-
-                                        // リセット
-                                        isCameraMode = true
-                                        capturedImage = null
-                                        detectedBarcodes = emptyList()
-                                        detectionBoxes = emptyList()
-                                        selectedBoxIndex = null
-                                        isProcessing = false
-                                        processMessage = ""
-                                        errorMessage = ""
+                                        resetToCamera()
                                     }
                                 } else {
                                     isProcessing = false
                                     processMessage = ""
-                                    errorMessage = "保存失敗: $localMessage"
+                                    errorMessage = "保存失敗: $message"
                                     selectedBoxIndex = null
                                 }
                             }
@@ -139,21 +134,15 @@ fun BarcodeScannerScreen(
             isProcessing = isProcessing,
             processMessage = processMessage,
             errorMessage = errorMessage,
-            onRetakeClick = {
-                // リセット
-                isCameraMode = true
-                capturedImage = null
-                detectedBarcodes = emptyList()
-                detectionBoxes = emptyList()
-                selectedBoxIndex = null
-                isProcessing = false
-                processMessage = ""
-                errorMessage = ""
-            },
+
+            // やり直しボタン
+            onRetakeClick = { resetToCamera() },
+
+            // シャッターボタン
             onShutterClick = {
-                currentImageCapture?.let { imageCapture ->
+                currentImageCapture?.let { ic ->
                     cameraManager.takePicture(
-                        imageCapture,
+                        ic,
                         onSuccess = { bitmap ->
                             cameraManager.stopCamera()
                             capturedImage = bitmap
@@ -161,28 +150,50 @@ fun BarcodeScannerScreen(
                             errorMessage = ""
                             isProcessing = false
                             processMessage = ""
-
-                            // リセット
                             detectedBarcodes = emptyList()
                             detectionBoxes = emptyList()
                             selectedBoxIndex = null
 
-                            // 自動的に検知開始
+                            // 自動でバーコード検知開始
                             isDetecting = true
                             barcodeProcessor.detectBarcodes(bitmap) { barcodes ->
-                                if (barcodes.isNotEmpty()) {
-                                    detectedBarcodes = barcodes
-                                    detectionBoxes = barcodes.mapNotNull { it.boundingBox }
-                                } else {
-                                    errorMessage = "バーコードが見つかりませんでした"
-                                }
+                                detectedBarcodes = barcodes
+                                detectionBoxes = barcodes.mapNotNull { it.boundingBox }
+                                // バーコードが見つからなくてもエラーは出さない（採用ボタンで写真保存できる）
                                 isDetecting = false
                             }
                         },
-                        onError = { e ->
-                            errorMessage = "撮影失敗"
-                        }
+                        onError = { errorMessage = "撮影失敗" }
                     )
+                }
+            },
+
+            // 採用ボタン（写真として保存）
+            onAdoptClick = {
+                if (isProcessing) return@ControlFooter
+
+                isProcessing = true
+                processMessage = "保存中..."
+                errorMessage = ""
+                val timestamp = makeTimestamp()
+
+                capturedImage?.let { bitmap ->
+                    storage.savePhotoResult(
+                        bitmap = bitmap,
+                        timestamp = timestamp
+                    ) { success, message ->
+                        if (success) {
+                            processMessage = "保存完了"
+                            scope.launch {
+                                kotlinx.coroutines.delay(1000)
+                                resetToCamera()
+                            }
+                        } else {
+                            isProcessing = false
+                            processMessage = ""
+                            errorMessage = "保存失敗: $message"
+                        }
+                    }
                 }
             }
         )

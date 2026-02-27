@@ -16,7 +16,8 @@ fun ControlFooter(
     processMessage: String,
     errorMessage: String,
     onRetakeClick: () -> Unit,
-    onShutterClick: () -> Unit
+    onShutterClick: () -> Unit,
+    onAdoptClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -31,14 +32,14 @@ fun ControlFooter(
                 .fillMaxHeight(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // ボタンエリア
             ButtonArea(
                 isCameraMode = isCameraMode,
+                isProcessing = isProcessing,
                 onRetakeClick = onRetakeClick,
-                onShutterClick = onShutterClick
+                onShutterClick = onShutterClick,
+                onAdoptClick = onAdoptClick
             )
 
-            // メッセージエリア
             MessageArea(
                 isCameraMode = isCameraMode,
                 isDetecting = isDetecting,

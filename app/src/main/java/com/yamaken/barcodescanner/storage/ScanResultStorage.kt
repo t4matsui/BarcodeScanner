@@ -12,7 +12,8 @@ import android.util.Log
 class ScanResultStorage(private val context: Context) {
 
     /**
-     * スキャン結果を本体ストレージに保存
+     * スキャン結果を保存（バーコード・QRコードモード）
+     * 保存先: Download/BarcodeScanner/yyyyMMdd/
      */
     fun saveScanResult(
         bitmap: Bitmap,
@@ -22,32 +23,68 @@ class ScanResultStorage(private val context: Context) {
         timestamp: String,
         onComplete: (Boolean, String) -> Unit
     ) {
+        val textContent = "種類: $scanType\n内容: $scanCode\n日時: $timestamp"
+        saveFiles(
+            bitmap = bitmap,
+            detectionBox = detectionBox,
+            textContent = textContent,
+            timestamp = timestamp,
+            onComplete = onComplete
+        )
+    }
+
+    /**
+     * 写真として保存（採用ボタン）
+     * 保存先: Download/BarcodeScanner/yyyyMMdd/
+     */
+    fun savePhotoResult(
+        bitmap: Bitmap,
+        timestamp: String,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val textContent = "種類: 写真\n内容: \n日時: $timestamp"
+        saveFiles(
+            bitmap = bitmap,
+            detectionBox = null,
+            textContent = textContent,
+            timestamp = timestamp,
+            onComplete = onComplete
+        )
+    }
+
+    /**
+     * 画像＋テキストファイルを共有ストレージに保存する共通処理
+     */
+    private fun saveFiles(
+        bitmap: Bitmap,
+        detectionBox: Rect?,
+        textContent: String,
+        timestamp: String,
+        onComplete: (Boolean, String) -> Unit
+    ) {
         try {
-            // 緑枠を描画したBitmapを作成
-            val bitmapWithFrame = createBitmapWithFrame(bitmap, detectionBox)
+            val bitmapToSave = if (detectionBox != null) {
+                createBitmapWithFrame(bitmap, detectionBox)
+            } else {
+                bitmap
+            }
+            val resizedBitmap = resizeBitmap(bitmapToSave, 1024)
 
-            // リサイズ（縦を1024pxに）
-            val resizedBitmap = resizeBitmap(bitmapWithFrame, 1024)
-
-            // タイムスタンプから日付とファイル名を分離
-            val dateFolder = timestamp.substring(0, 8) // yyyyMMdd
-            val fileName = timestamp.substring(9) // HHmmss
+            val dateFolder = timestamp.substring(0, 8)  // yyyyMMdd
+            val fileName = timestamp.substring(9)        // HHmmss
+            val savePath = "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder"
 
             // テキストファイル保存
             val textValues = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.txt")
                 put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
+                put(MediaStore.Downloads.RELATIVE_PATH, savePath)
             }
-
             val textUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                textValues
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI, textValues
             )
-
             textUri?.let { uri ->
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    val textContent = "種類: $scanType\n内容: $scanCode\n日時: $timestamp"
                     out.write(textContent.toByteArray())
                 }
                 Log.d("ScanResultStorage", "テキスト保存成功: $uri")
@@ -57,14 +94,11 @@ class ScanResultStorage(private val context: Context) {
             val imageValues = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, "$fileName.jpg")
                 put(MediaStore.Downloads.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/BarcodeScanner/$dateFolder")
+                put(MediaStore.Downloads.RELATIVE_PATH, savePath)
             }
-
             val imageUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                imageValues
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI, imageValues
             )
-
             imageUri?.let { uri ->
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
@@ -73,15 +107,12 @@ class ScanResultStorage(private val context: Context) {
             }
 
             if (textUri != null && imageUri != null) {
-                onComplete(true, "保存成功: Download/BarcodeScanner/$dateFolder/")
-                Log.d("ScanResultStorage", "保存完了")
+                onComplete(true, "保存完了: Download/BarcodeScanner/$dateFolder/")
             } else {
                 onComplete(false, "保存失敗: URIの作成に失敗")
-                Log.e("ScanResultStorage", "textUri=$textUri, imageUri=$imageUri")
             }
         } catch (e: Exception) {
             Log.e("ScanResultStorage", "保存失敗", e)
-            e.printStackTrace()
             onComplete(false, "保存失敗: ${e.message}")
         }
     }
@@ -94,26 +125,16 @@ class ScanResultStorage(private val context: Context) {
         val canvas = android.graphics.Canvas(mutableBitmap)
 
         detectionBox?.let { box ->
-            Log.d("ScanResultStorage", "描画する枠: left=${box.left}, top=${box.top}, right=${box.right}, bottom=${box.bottom}")
-            Log.d("ScanResultStorage", "Bitmapサイズ: ${mutableBitmap.width}x${mutableBitmap.height}")
-
             val paint = android.graphics.Paint().apply {
-                color = android.graphics.Color.argb(153, 0, 255, 0) // 60%透明度の緑
+                color = android.graphics.Color.argb(153, 0, 255, 0)
                 style = android.graphics.Paint.Style.STROKE
                 strokeWidth = 8f
             }
-
             canvas.drawRect(
-                box.left.toFloat(),
-                box.top.toFloat(),
-                box.right.toFloat(),
-                box.bottom.toFloat(),
+                box.left.toFloat(), box.top.toFloat(),
+                box.right.toFloat(), box.bottom.toFloat(),
                 paint
             )
-
-            Log.d("ScanResultStorage", "枠描画完了")
-        } ?: run {
-            Log.e("ScanResultStorage", "detectionBoxがnull")
         }
 
         return mutableBitmap
@@ -125,7 +146,6 @@ class ScanResultStorage(private val context: Context) {
     private fun resizeBitmap(bitmap: Bitmap, targetHeight: Int): Bitmap {
         val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
         val targetWidth = (targetHeight * aspectRatio).toInt()
-
         return Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
     }
 }

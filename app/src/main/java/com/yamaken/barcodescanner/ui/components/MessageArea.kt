@@ -17,8 +17,15 @@ fun MessageArea(
     errorMessage: String
 ) {
     Column {
-        if (!isCameraMode) {
-            // 静止画表示モード
+        if (isCameraMode) {
+            // カメラモード
+            Text(
+                text = "バーコード、QRコード、写真を撮影してください。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            // 静止画レビューモード
             Text(
                 text = when {
                     isProcessing -> "処理中"
@@ -37,38 +44,33 @@ fun MessageArea(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (errorMessage.isNotEmpty()) {
-                Text(
+            when {
+                errorMessage.isNotEmpty() -> Text(
                     text = errorMessage,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
-            } else if (processMessage.isNotEmpty()) {
-                Text(
+                processMessage.isNotEmpty() -> Text(
                     text = processMessage,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
-            } else if (detectedCount > 0) {
-                Text(
-                    text = "スキャンしたいバーコードをタップしてください",
+                detectedCount > 0 -> Text(
+                    text = "バーコードをタップしてスキャン、または「写真保存」",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else if (isDetecting) {
-                Text(
+                isDetecting -> Text(
                     text = "バーコードを検知しています...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                else -> Text(
+                    text = "「写真保存」で写真として保存できます",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        } else {
-            // カメラモード
-            Text(
-                text = "バーコード、QRコードを撮影してください。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
